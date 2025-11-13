@@ -396,3 +396,205 @@ class StandardBiGRU(nn.Module):
         last_output = bigru_out[:, -1, :]
         output = self.output_net(last_output)
         return output, None
+
+class PositionalEncoding(nn.Module):
+    """Positional encoding for Transformer"""
+    def __init__(self, d_model, max_len=5000, dropout=0.1):
+        super(PositionalEncoding, self).__init__()
+        self.dropout = nn.Dropout(p=dropout)
+        
+        # Create positional encoding matrix
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
+        
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        pe = pe.unsqueeze(0)
+        
+        self.register_buffer('pe', pe)
+    
+    def forward(self, x):
+        # x: (batch, seq_len, d_model)
+        x = x + self.pe[:, :x.size(1), :]
+        return self.dropout(x)
+
+class TransformerPredictor(nn.Module):
+    """Transformer encoder for time series prediction"""
+    def __init__(self, input_size, d_model=256, nhead=8, num_layers=6, 
+                 dim_feedforward=1024, dropout=0.3):
+        super(TransformerPredictor, self).__init__()
+        
+        self.input_size = input_size
+        self.d_model = d_model
+        
+        # Input projection
+        self.input_projection = nn.Sequential(
+            nn.Linear(input_size, d_model),
+            nn.LayerNorm(d_model),
+            nn.Dropout(dropout)
+        )
+        
+        # Positional encoding
+        self.pos_encoder = PositionalEncoding(d_model, dropout=dropout)
+        
+        # Transformer encoder
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=d_model,
+            nhead=nhead,
+            dim_feedforward=dim_feedforward,
+            dropout=dropout,
+            activation='gelu',
+            batch_first=True,
+            norm_first=True  # Pre-LN Transformer (more stable)
+        )
+        
+        self.transformer_encoder = nn.TransformerEncoder(
+            encoder_layer,
+            num_layers=num_layers,
+            norm=nn.LayerNorm(d_model)
+        )
+        
+        # Global pooling strategies
+        self.use_cls_token = True
+        if self.use_cls_token:
+            self.cls_token = nn.Parameter(torch.randn(1, 1, d_model))
+        
+        # Output network
+        self.output_net = nn.Sequential(
+            nn.Linear(d_model, d_model // 2),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(d_model // 2, d_model // 4),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(d_model // 4, 1)
+        )
+    
+    def forward(self, x, physics_features=None):
+        # x: (batch, seq_len, input_size)
+        batch_size, seq_len, _ = x.size()
+        
+        # Project input to d_model
+        x = self.input_projection(x)
+        
+        # Add CLS token if using
+        if self.use_cls_token:
+            cls_tokens = self.cls_token.expand(batch_size, -1, -1)
+            x = torch.cat([cls_tokens, x], dim=1)
+        
+        # Add positional encoding
+        x = self.pos_encoder(x)
+        
+        # Apply transformer encoder
+        transformer_out = self.transformer_encoder(x)
+        
+        # Extract representation
+        if self.use_cls_token:
+            # Use CLS token representation
+            representation = transformer_out[:, 0, :]
+        else:
+            # Use mean pooling
+            representation = torch.mean(transformer_out, dim=1)
+        
+        # Generate prediction
+        output = self.output_net(representation)
+        
+        # Return attention weights from last layer for visualization
+        # Note: For true attention weights, we'd need to modify TransformerEncoder
+        attention_weights = None
+        
+        return output, attention_weights
+
+class EnhancedTransformerPredictor(nn.Module):
+    """Transformer with Physics-Informed features"""
+    def __init__(self, input_size, d_model=256, nhead=8, num_layers=6, 
+                 dim_feedforward=1024, dropout=0.3):
+        super(EnhancedTransformerPredictor, self).__init__()
+        
+        self.input_size = input_size
+        self.d_model = d_model
+        
+        # Input projection
+        self.input_projection = nn.Sequential(
+            nn.Linear(input_size, d_model),
+            nn.LayerNorm(d_model),
+            nn.Dropout(dropout)
+        )
+        
+        # Positional encoding
+        self.pos_encoder = PositionalEncoding(d_model, dropout=dropout)
+        
+        # Transformer encoder
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=d_model,
+            nhead=nhead,
+            dim_feedforward=dim_feedforward,
+            dropout=dropout,
+            activation='gelu',
+            batch_first=True,
+            norm_first=True
+        )
+        
+        self.transformer_encoder = nn.TransformerEncoder(
+            encoder_layer,
+            num_layers=num_layers,
+            norm=nn.LayerNorm(d_model)
+        )
+        
+        # CLS token
+        self.cls_token = nn.Parameter(torch.randn(1, 1, d_model))
+        
+        # Physics layer
+        self.physics_layer = DiurnalAwarePhysicsLayer(input_size, d_model)
+        
+        # Fusion
+        self.fusion = nn.Sequential(
+            nn.Linear(d_model * 2, d_model),
+            nn.LayerNorm(d_model),
+            nn.GELU(),
+            nn.Dropout(dropout)
+        )
+        
+        # Output network
+        self.output_net = nn.Sequential(
+            nn.Linear(d_model, d_model // 2),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(d_model // 2, d_model // 4),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(d_model // 4, 1)
+        )
+    
+    def forward(self, x, physics_features):
+        # x: (batch, seq_len, input_size)
+        batch_size, seq_len, _ = x.size()
+        
+        # Project input
+        x = self.input_projection(x)
+        
+        # Add CLS token
+        cls_tokens = self.cls_token.expand(batch_size, -1, -1)
+        x = torch.cat([cls_tokens, x], dim=1)
+        
+        # Add positional encoding
+        x = self.pos_encoder(x)
+        
+        # Apply transformer
+        transformer_out = self.transformer_encoder(x)
+        
+        # Extract CLS representation
+        transformer_repr = transformer_out[:, 0, :]
+        
+        # Physics processing
+        physics_out = self.physics_layer(physics_features)
+        
+        # Fusion
+        combined = torch.cat([transformer_repr, physics_out], dim=1)
+        fused = self.fusion(combined)
+        
+        # Output
+        output = self.output_net(fused)
+        
+        return output, None

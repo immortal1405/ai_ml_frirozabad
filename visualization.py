@@ -15,7 +15,7 @@ plt.rcParams['figure.dpi'] = 300
 
 CITY = 'firozabad'
 MODELS = ['RandomForest', 'XGBoost', 'LSTM', 'GRU', 'BiLSTM', 'BiGRU', 
-          'Enhanced_BiLSTM', 'Enhanced_BiGRU']
+          'Enhanced_BiLSTM', 'Enhanced_BiGRU', 'Transformer', 'Enhanced_Transformer']
 
 def create_comprehensive_plot(city, model_type, predictions, targets, time_index, metrics):
     """Create comprehensive hourly analysis with diurnal patterns"""
@@ -155,8 +155,17 @@ Match: {(1-metrics['Variance_Diff']/max(metrics['Variance_Actual'],1e-6))*100:.2
 def create_summary_table():
     """Create summary performance table for Firozabad"""
     
+    # Load main results
     with open('inference_results_firozabad/firozabad_inference_nov9_11_2025.json', 'r') as f:
         results = json.load(f)
+    
+    # Load transformer results if available
+    try:
+        with open('inference_results_firozabad/firozabad_transformer_inference_nov9_11_2025.json', 'r') as f:
+            transformer_results = json.load(f)
+            results.update(transformer_results)
+    except FileNotFoundError:
+        print("⚠ Transformer results not found, skipping...")
     
     summary_data = []
     for model in MODELS:
@@ -206,12 +215,21 @@ def create_summary_table():
         print("="*90 + "\n")
 
 def create_model_comparison():
-    """Create comprehensive comparison across all 8 models for Firozabad"""
+    """Create comprehensive comparison across all 10 models for Firozabad"""
 
+    # Load main results
     with open('inference_results_firozabad/firozabad_inference_nov9_11_2025.json', 'r') as f:
         results = json.load(f)
     
-    fig, axes = plt.subplots(2, 2, figsize=(18, 14))
+    # Load transformer results if available
+    try:
+        with open('inference_results_firozabad/firozabad_transformer_inference_nov9_11_2025.json', 'r') as f:
+            transformer_results = json.load(f)
+            results.update(transformer_results)
+    except FileNotFoundError:
+        print("⚠ Transformer results not found, skipping...")
+    
+    fig, axes = plt.subplots(2, 2, figsize=(20, 14))
     fig.suptitle('Firozabad PM2.5 - Model Comparison (Nov 9-11, 2025)',
                 fontsize=16, fontweight='bold')
     
@@ -229,6 +247,8 @@ def create_model_comparison():
                 # Color ML models differently from DL models
                 if model in ['RandomForest', 'XGBoost']:
                     colors.append('#2E86AB')  # Blue for ML
+                elif 'Transformer' in model:
+                    colors.append('#C73E1D')  # Red for Transformers
                 elif 'Enhanced' in model:
                     colors.append('#A23B72')  # Purple for Enhanced
                 else:
@@ -260,7 +280,8 @@ def create_model_comparison():
     legend_elements = [
         Patch(facecolor='#2E86AB', label='ML Models', alpha=0.8),
         Patch(facecolor='#F18F01', label='Standard DL', alpha=0.8),
-        Patch(facecolor='#A23B72', label='Enhanced DL', alpha=0.8)
+        Patch(facecolor='#A23B72', label='Enhanced DL', alpha=0.8),
+        Patch(facecolor='#C73E1D', label='Transformers', alpha=0.8)
     ]
     axes[0, 1].legend(handles=legend_elements, loc='upper right', fontsize=10)
     
@@ -273,10 +294,19 @@ def create_model_comparison():
 def create_variance_comparison():
     """Create variance comparison for Firozabad across all models"""
 
+    # Load main results
     with open('inference_results_firozabad/firozabad_inference_nov9_11_2025.json', 'r') as f:
         results = json.load(f)
     
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(18, 7))
+    # Load transformer results if available
+    try:
+        with open('inference_results_firozabad/firozabad_transformer_inference_nov9_11_2025.json', 'r') as f:
+            transformer_results = json.load(f)
+            results.update(transformer_results)
+    except FileNotFoundError:
+        print("⚠ Transformer results not found, skipping...")
+    
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 7))
     fig.suptitle('Firozabad PM2.5 - Variance Analysis (Nov 9-11, 2025)',
                 fontsize=16, fontweight='bold')
     
@@ -325,6 +355,7 @@ def create_variance_comparison():
             var_diffs.append(0)
     
     colors = ['#2E86AB' if m in ['RandomForest', 'XGBoost'] 
+              else '#C73E1D' if 'Transformer' in m
               else '#A23B72' if 'Enhanced' in m 
               else '#F18F01' for m in models]
     
@@ -365,8 +396,18 @@ def main():
     
     os.makedirs('results_firozabad', exist_ok=True)
 
+    # Load main results
     with open('inference_results_firozabad/firozabad_inference_nov9_11_2025.json', 'r') as f:
         results = json.load(f)
+    
+    # Load transformer results if available
+    try:
+        with open('inference_results_firozabad/firozabad_transformer_inference_nov9_11_2025.json', 'r') as f:
+            transformer_results = json.load(f)
+            results.update(transformer_results)
+            print("✓ Loaded Transformer results\n")
+    except FileNotFoundError:
+        print("⚠ Transformer results not found, skipping...\n")
     
     # Create individual model plots
     print("Creating visualizations for Firozabad...\n")
@@ -396,11 +437,12 @@ def main():
     print("✓ VISUALIZATION COMPLETE")
     print("="*90)
     print("\nGenerated files in 'results_firozabad/' folder:")
-    print(f"  • firozabad_{{model}}_nov9_11_analysis.png - Individual model analysis (8 files)")
+    print(f"  • firozabad_{{model}}_nov9_11_analysis.png - Individual model analysis (10 files)")
     print("  • model_comparison_nov9_11.png - Metrics comparison across all models")
     print("  • variance_comparison_nov9_11.png - Variance analysis")
     print("  • performance_summary_nov9_11.csv - Complete metrics table")
     print("\nTest Period: November 9-11, 2025 (72 hours)")
+    print("Models: 2 ML + 6 DL + 2 Transformers = 10 Total")
     print("="*90 + "\n")
 
 if __name__ == "__main__":
